@@ -164,7 +164,7 @@ def get_basic_details(args, item):
 		"net_amount": 0.0,
 		"discount_percentage": 0.0,
 		"supplier": item.default_supplier,
-		"delivered_by_supplier": item.delivered_by_supplier,
+		"delivered_by_supplier": item.delivered_by_supplier
 	})
 
 	# if default specified in item is for another company, fetch from company
@@ -196,7 +196,7 @@ def get_default_cost_center(args, item):
 		or args.get("cost_center"))
 
 def get_price_list_rate(args, item_doc, out):
-	meta = frappe.get_meta(args.doctype)
+	meta = frappe.get_meta(args.parenttype or args.doctype)
 
 	if meta.get_field("currency"):
 		validate_price_list(args)
