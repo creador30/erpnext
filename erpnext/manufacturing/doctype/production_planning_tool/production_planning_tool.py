@@ -32,9 +32,11 @@ class ProductionPlanningTool(Document):
 			so_filter += " and so.transaction_date <= %(to_date)s"
 		if self.customer:
 			so_filter += " and so.customer = %(customer)s"
+		if self.project:
+			so_filter += " and so.project = %(project)s"
 
 		if self.fg_item:
-			item_filter += " and item.name = %(item)s"
+			item_filter += " and so_item.item_code = %(item)s"
 
 		open_so = frappe.db.sql("""
 			select distinct so.name, so.transaction_date, so.customer, so.base_grand_total
@@ -42,17 +44,18 @@ class ProductionPlanningTool(Document):
 			where so_item.parent = so.name
 				and so.docstatus = 1 and so.status != "Stopped"
 				and so.company = %(company)s
-				and so_item.qty > so_item.delivered_qty {0}
-				and (exists (select name from `tabItem` item where item.name=so_item.item_code
-					and ((item.is_pro_applicable = 1 or item.is_sub_contracted_item = 1) {1}))
+				and so_item.qty > so_item.delivered_qty {0} {1}
+				and (exists (select name from `tabBOM` bom where bom.item=so_item.item_code
+						and bom.is_active = 1)
 					or exists (select name from `tabPacked Item` pi
 						where pi.parent = so.name and pi.parent_item = so_item.item_code
-							and exists (select name from `tabItem` item where item.name=pi.item_code
-								and (item.is_pro_applicable = 1 or item.is_sub_contracted_item = 1) {2})))
-			""".format(so_filter, item_filter, item_filter), {
+							and exists (select name from `tabBOM` bom where bom.item=pi.item_code
+								and bom.is_active = 1)))
+			""".format(so_filter, item_filter), {
 				"from_date": self.from_date,
 				"to_date": self.to_date,
 				"customer": self.customer,
+				"project": self.project,
 				"item": self.fg_item,
 				"company": self.company
 			}, as_dict=1)
@@ -71,7 +74,7 @@ class ProductionPlanningTool(Document):
 				pp_so.sales_order_date = cstr(r['transaction_date'])
 				pp_so.customer = cstr(r['customer'])
 				pp_so.grand_total = flt(r['base_grand_total'])
-	
+
 	def get_pending_material_requests(self):
 		""" Pull Material Requests that are pending based on criteria selected"""
 		mr_filter = item_filter = ""
@@ -81,9 +84,9 @@ class ProductionPlanningTool(Document):
 			mr_filter += " and mr.transaction_date <= %(to_date)s"
 		if self.warehouse:
 			mr_filter += " and mr_item.warehouse = %(warehouse)s"
-			
+
 		if self.fg_item:
-			item_filter += " and item.name = %(item)s"
+			item_filter += " and mr_item.item_code = %(item)s"
 
 		pending_mr = frappe.db.sql("""
 			select distinct mr.name, mr.transaction_date
@@ -91,9 +94,9 @@ class ProductionPlanningTool(Document):
 			where mr_item.parent = mr.name
 				and mr.material_request_type = "Manufacture"
 				and mr.docstatus = 1
-				and mr_item.qty > mr_item.ordered_qty {0}
-				and (exists (select name from `tabItem` item where item.name=mr_item.item_code
-					and (item.is_pro_applicable = 1 or item.is_sub_contracted_item = 1 {1})))
+				and mr_item.qty > ifnull(mr_item.ordered_qty,0) {0} {1}
+				and (exists (select name from `tabBOM` bom where bom.item=mr_item.item_code
+					and bom.is_active = 1))
 			""".format(mr_filter, item_filter), {
 				"from_date": self.from_date,
 				"to_date": self.to_date,
@@ -102,7 +105,7 @@ class ProductionPlanningTool(Document):
 			}, as_dict=1)
 
 		self.add_mr_in_table(pending_mr)
-		
+
 	def add_mr_in_table(self, pending_mr):
 		""" Add Material Requests in the table"""
 		self.clear_table("material_requests")
@@ -119,7 +122,7 @@ class ProductionPlanningTool(Document):
 			self.get_so_items()
 		elif self.get_items_from == "Material Request":
 			self.get_mr_items()
-		
+
 	def get_so_items(self):
 		so_list = [d.sales_order for d in self.get('sales_orders') if d.sales_order]
 		if not so_list:
@@ -128,18 +131,18 @@ class ProductionPlanningTool(Document):
 
 		item_condition = ""
 		if self.fg_item:
-			item_condition = ' and so_item.item_code = "' + self.fg_item + '"'
+			item_condition = ' and so_item.item_code = "{0}"'.format(frappe.db.escape(self.fg_item))
 
 		items = frappe.db.sql("""select distinct parent, item_code, warehouse,
 			(qty - delivered_qty) as pending_qty
 			from `tabSales Order Item` so_item
 			where parent in (%s) and docstatus = 1 and qty > delivered_qty
-			and exists (select * from `tabItem` item where item.name=so_item.item_code
-				and item.is_pro_applicable = 1) %s""" % \
+			and exists (select name from `tabBOM` bom where bom.item=so_item.item_code
+					and bom.is_active = 1) %s""" % \
 			(", ".join(["%s"] * len(so_list)), item_condition), tuple(so_list), as_dict=1)
 
 		if self.fg_item:
-			item_condition = ' and pi.item_code = "' + self.fg_item + '"'
+			item_condition = ' and pi.item_code = "{0}"'.format(frappe.db.escape(self.fg_item))
 
 		packed_items = frappe.db.sql("""select distinct pi.parent, pi.item_code, pi.warehouse as warehouse,
 			(((so_item.qty - so_item.delivered_qty) * pi.qty) / so_item.qty)
@@ -148,12 +151,12 @@ class ProductionPlanningTool(Document):
 			where so_item.parent = pi.parent and so_item.docstatus = 1
 			and pi.parent_item = so_item.item_code
 			and so_item.parent in (%s) and so_item.qty > so_item.delivered_qty
-			and exists (select * from `tabItem` item where item.name=pi.item_code
-				and item.is_pro_applicable = 1) %s""" % \
+			and exists (select name from `tabBOM` bom where bom.item=pi.item_code
+					and bom.is_active = 1) %s""" % \
 			(", ".join(["%s"] * len(so_list)), item_condition), tuple(so_list), as_dict=1)
 
 		self.add_items(items + packed_items)
-	
+
 	def get_mr_items(self):
 		mr_list = [d.material_request for d in self.get('material_requests') if d.material_request]
 		if not mr_list:
@@ -168,12 +171,12 @@ class ProductionPlanningTool(Document):
 			(qty - ordered_qty) as pending_qty
 			from `tabMaterial Request Item` mr_item
 			where parent in (%s) and docstatus = 1 and qty > ordered_qty
-			and exists (select * from `tabItem` item where item.name=mr_item.item_code
-				and item.is_pro_applicable = 1) %s""" % \
+			and exists (select name from `tabBOM` bom where bom.item=mr_item.item_code
+				and bom.is_active = 1) %s""" % \
 			(", ".join(["%s"] * len(mr_list)), item_condition), tuple(mr_list), as_dict=1)
 
 		self.add_items(items)
-		
+
 
 	def add_items(self, items):
 		self.clear_table("items")
@@ -187,13 +190,13 @@ class ProductionPlanningTool(Document):
 			pi.bom_no					= item_details and item_details.bom_no or ''
 			pi.planned_qty				= flt(p['pending_qty'])
 			pi.pending_qty				= flt(p['pending_qty'])
-			
+
 			if self.get_items_from == "Sales Order":
 				pi.sales_order		= p['parent']
 			elif self.get_items_from == "Material Request":
 				pi.material_request		= p['parent']
 				pi.material_request_item = p['name']
-			
+
 	def validate_data(self):
 		self.validate_company()
 		for d in self.get('items'):
@@ -201,7 +204,7 @@ class ProductionPlanningTool(Document):
 				frappe.throw(_("Please select BOM for Item in Row {0}".format(d.idx)))
 			else:
 				validate_bom_no(d.item_code, d.bom_no)
-	
+
 			if not flt(d.planned_qty):
 				frappe.throw(_("Please enter Planned Qty for Item {0} at row {1}").format(d.item_code, d.idx))
 
@@ -213,17 +216,17 @@ class ProductionPlanningTool(Document):
 		validate_uom_is_integer(self, "stock_uom", "planned_qty")
 
 		items = self.get_production_items()
-		
+
 		pro_list = []
 		frappe.flags.mute_messages = True
-		
+
 		for key in items:
 			production_order = self.create_production_order(items[key])
 			if production_order:
 				pro_list.append(production_order)
-		
+
 		frappe.flags.mute_messages = False
-		
+
 		if pro_list:
 			pro_list = ["""<a href="#Form/Production Order/%s" target="_blank">%s</a>""" % \
 				(p, p) for p in pro_list]
@@ -247,14 +250,14 @@ class ProductionPlanningTool(Document):
 				"fg_warehouse"			: d.warehouse,
 				"status"				: "Draft",
 			}
-			
+
 			""" Club similar BOM and item for processing in case of Sales Orders """
 			if self.get_items_from == "Material Request":
 				item_details.update({
 					"qty": d.planned_qty
 				})
 				item_dict[(d.item_code, d.material_request_item, d.warehouse)] = item_details
-			
+
 			else:
 				item_details.update({
 					"qty":flt(item_dict.get((d.item_code, d.sales_order, d.warehouse),{})
@@ -275,7 +278,7 @@ class ProductionPlanningTool(Document):
 			pro.wip_warehouse = warehouse.get('wip_warehouse')
 		if not pro.fg_warehouse:
 			pro.fg_warehouse = warehouse.get('fg_warehouse')
-		
+
 		try:
 			pro.insert()
 			return pro.name
@@ -283,7 +286,7 @@ class ProductionPlanningTool(Document):
 			pass
 
 	def get_so_wise_planned_qty(self):
-		"""	
+		"""
 			bom_dict {
 				bom_no: ['sales_order', 'qty']
 			}
@@ -295,7 +298,7 @@ class ProductionPlanningTool(Document):
 			else:
 				bom_dict.setdefault(d.bom_no, []).append([d.sales_order, flt(d.planned_qty)])
 		return bom_dict
-		
+
 	def download_raw_materials(self):
 		""" Create csv data for required raw material to produce finished goods"""
 		self.validate_data()
@@ -321,7 +324,6 @@ class ProductionPlanningTool(Document):
 					fb.description, fb.stock_uom, it.min_order_qty
 					from `tabBOM Explosion Item` fb, `tabBOM` bom, `tabItem` it
 					where bom.name = fb.parent and it.name = fb.item_code
-					and (is_pro_applicable = 0 or ifnull(default_bom, "")="")
 					and (is_sub_contracted_item = 0 or ifnull(default_bom, "")="")
 					and is_stock_item = 1
 					and fb.docstatus<2 and bom.name=%s

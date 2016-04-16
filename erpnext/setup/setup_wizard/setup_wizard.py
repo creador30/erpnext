@@ -10,7 +10,6 @@ from frappe.utils.file_manager import save_file
 from .default_website import website_maker
 import install_fixtures
 from .sample_data import make_sample_data
-from erpnext.accounts.utils import FiscalYearError
 from erpnext.accounts.doctype.account.account import RootNotEditable
 from frappe.core.doctype.communication.comment import add_info_comment
 
@@ -46,7 +45,7 @@ def setup_complete(args=None):
 		try:
 			make_sample_data()
 			frappe.clear_cache()
-		except FiscalYearError:
+		except:
 			# clear message
 			if frappe.message_log:
 				frappe.message_log.pop()
@@ -136,6 +135,7 @@ def set_defaults(args):
 	stock_settings = frappe.get_doc("Stock Settings")
 	stock_settings.item_naming_by = "Item Code"
 	stock_settings.valuation_method = "FIFO"
+	stock_settings.default_warehouse = frappe.db.get_value('Warehouse', {'warehouse_name': _('Stores')})
 	stock_settings.stock_uom = _("Nos")
 	stock_settings.auto_indent = 1
 	stock_settings.auto_insert_price_list_rate_if_missing = 1
@@ -277,7 +277,6 @@ def create_items(args):
 			is_sales_item = args.get("is_sales_item_" + str(i))
 			is_purchase_item = args.get("is_purchase_item_" + str(i))
 			is_stock_item = item_group!=_("Services")
-			is_pro_applicable = item_group!=_("Services")
 			default_warehouse = ""
 			if is_stock_item:
 				default_warehouse = frappe.db.get_value("Warehouse", filters={
@@ -291,11 +290,8 @@ def create_items(args):
 					"item_code": item,
 					"item_name": item,
 					"description": item,
-					"is_sales_item": 1 if is_sales_item else 0,
-					"is_purchase_item": 1 if is_purchase_item else 0,
 					"show_in_website": 1,
 					"is_stock_item": is_stock_item and 1 or 0,
-					"is_pro_applicable": is_pro_applicable and 1 or 0,
 					"item_group": item_group,
 					"stock_uom": args.get("item_uom_" + str(i)),
 					"default_warehouse": default_warehouse
@@ -426,7 +422,7 @@ def create_users(args):
 	# create employee for self
 	emp = frappe.get_doc({
 		"doctype": "Employee",
-		"full_name": " ".join(filter(None, [args.get("first_name"), args.get("last_name")])),
+		"employee_name": " ".join(filter(None, [args.get("first_name"), args.get("last_name")])),
 		"user_id": frappe.session.user,
 		"status": "Active",
 		"company": args.get("company_name")
@@ -470,7 +466,7 @@ def create_users(args):
 				# create employee
 				emp = frappe.get_doc({
 					"doctype": "Employee",
-					"full_name": fullname,
+					"employee_name": fullname,
 					"user_id": email,
 					"status": "Active",
 					"company": args.get("company_name")

@@ -4,7 +4,7 @@
 from __future__ import unicode_literals
 import frappe
 
-from frappe.utils import flt, getdate
+from frappe.utils import flt, getdate, get_url
 from frappe import _
 
 from frappe.model.document import Document
@@ -36,6 +36,7 @@ class Project(Document):
 		self.validate_dates()
 		self.sync_tasks()
 		self.tasks = []
+		self.send_welcome_email()
 
 	def validate_dates(self):
 		if self.expected_start_date and self.expected_end_date:
@@ -79,7 +80,7 @@ class Project(Document):
 		self.update_percent_complete()
 		self.update_costing()
 		self.flags.dont_sync_tasks = True
-		self.save()
+		self.save(ignore_permissions = True)
 
 	def update_percent_complete(self):
 		total = frappe.db.sql("""select count(*) from tabTask where project=%s""", self.name)[0][0]
@@ -123,6 +124,46 @@ class Project(Document):
 			from `tabPurchase Invoice Item` where project = %s and docstatus=1""", self.name)
 
 		self.total_purchase_cost = total_purchase_cost and total_purchase_cost[0][0] or 0
+
+	def send_welcome_email(self):
+		url = get_url("/project/?name={0}".format(self.name))
+		messages = (
+		_("You have been invited to collaborate on the project: {0}".format(self.name)),
+		url,
+		_("Join")
+		)
+
+		content = """
+		<p>{0}.</p>
+		<p><a href="{1}">{2}</a></p>
+		"""
+
+		for user in self.users:
+			if user.welcome_email_sent==0:
+				frappe.sendmail(user.user, subject=_("Project Collaboration Invitation"), content=content.format(*messages), bulk=True)
+				user.welcome_email_sent=1
+
+
+def get_project_list(doctype, txt, filters, limit_start, limit_page_length=20):
+	return frappe.db.sql('''select distinct project.*
+		from tabProject project, `tabProject User` project_user
+		where
+			(project_user.user = %(user)s
+			and project_user.parent = project.name)
+			or project.owner = %(user)s
+			order by project.modified desc
+			limit {0}, {1}
+		'''.format(limit_start, limit_page_length),
+			{'user':frappe.session.user},
+			as_dict=True,
+			update={'doctype':'Project'})
+
+def get_list_context(context=None):
+	return {
+		"title": _("My Projects"),
+		"get_list": get_project_list,
+		"row_template": "templates/includes/projects/project_row.html"
+	}
 
 @frappe.whitelist()
 def get_cost_center_name(project):

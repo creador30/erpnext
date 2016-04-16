@@ -47,7 +47,7 @@ erpnext.buying.PurchaseOrderController = erpnext.buying.BuyingController.extend(
 
 			if(is_drop_ship && doc.status!="Delivered"){
 				cur_frm.add_custom_button(__('Delivered'),
-					 this.delivered_by_supplier, __("Status"));
+					this.delivered_by_supplier, __("Status"));
 
 				cur_frm.page.set_inner_btn_group_as_primary(__("Status"));
 			}
@@ -61,7 +61,7 @@ erpnext.buying.PurchaseOrderController = erpnext.buying.BuyingController.extend(
 			}
 		}
 
-		if(doc.docstatus == 1 && doc.status != "Closed") {
+		if(doc.docstatus == 1 && !in_list(["Closed", "Completed"], doc.status)) {
 			if(flt(doc.per_received, 2) < 100 && allow_receipt) {
 				cur_frm.add_custom_button(__('Receive'), this.make_purchase_receipt, __("Make"));
 

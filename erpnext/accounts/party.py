@@ -16,7 +16,7 @@ class DuplicatePartyAccountError(frappe.ValidationError): pass
 
 @frappe.whitelist()
 def get_party_details(party=None, account=None, party_type="Customer", company=None,
-	posting_date=None, price_list=None, currency=None, doctype=None):
+	posting_date=None, price_list=None, currency=None, doctype=None, ignore_permissions=False):
 
 	if not party:
 		return {}
@@ -25,7 +25,7 @@ def get_party_details(party=None, account=None, party_type="Customer", company=N
 		frappe.throw(_("{0}: {1} does not exists").format(party_type, party))
 
 	return _get_party_details(party, account, party_type,
-		company, posting_date, price_list, currency, doctype)
+		company, posting_date, price_list, currency, doctype, ignore_permissions)
 
 def _get_party_details(party=None, account=None, party_type="Customer", company=None,
 	posting_date=None, price_list=None, currency=None, doctype=None, ignore_permissions=False):
@@ -227,9 +227,15 @@ def validate_party_accounts(doc):
 
 		party_account_currency = frappe.db.get_value("Account", account.account, "account_currency")
 		existing_gle_currency = get_party_gle_currency(doc.doctype, doc.name, account.company)
+		company_default_currency = frappe.db.get_value("Company",
+			frappe.db.get_default("Company"), "default_currency", cache=True)
 
 		if existing_gle_currency and party_account_currency != existing_gle_currency:
 			frappe.throw(_("Accounting entries have already been made in currency {0} for company {1}. Please select a receivable or payable account with currency {0}.").format(existing_gle_currency, account.company))
+
+		if doc.default_currency and party_account_currency and company_default_currency:
+			if doc.default_currency != party_account_currency and doc.default_currency != company_default_currency:
+				frappe.throw(_("Billing currency must be equal to either default comapany's currency or party's payble account currency"))
 
 @frappe.whitelist()
 def get_due_date(posting_date, party_type, party, company):
@@ -299,8 +305,12 @@ def set_taxes(party, party_type, posting_date, company, customer_group=None, sup
 	else:
 		args.update(get_party_details(party, party_type))
 
-	if party_type=="Customer":
+	if party_type in ("Customer", "Lead"):
 		args.update({"tax_type": "Sales"})
+
+		if party_type=='Lead':
+			args['customer'] = None
+			del args['lead']
 	else:
 		args.update({"tax_type": "Purchase"})
 
@@ -313,8 +323,15 @@ def validate_party_frozen_disabled(party_type, party_name):
 	if party_type and party_name:
 		party = frappe.db.get_value(party_type, party_name, ["is_frozen", "disabled"], as_dict=True)
 		if party.disabled:
-			frappe.throw("{0} {1} is disabled".format(party_type, party_name), PartyDisabled)
+			frappe.throw(_("{0} {1} is disabled").format(party_type, party_name), PartyDisabled)
 		elif party.is_frozen:
 			frozen_accounts_modifier = frappe.db.get_value( 'Accounts Settings', None,'frozen_accounts_modifier')
 			if not frozen_accounts_modifier in frappe.get_roles():
-				frappe.throw("{0} {1} is frozen".format(party_type, party_name), PartyFrozen)
+				frappe.throw(_("{0} {1} is frozen").format(party_type, party_name), PartyFrozen)
+
+def get_timeline_data(doctype, name):
+	'''returns timeline data for the past one year'''
+	from frappe.desk.form.load import get_communication_data
+	data = get_communication_data(doctype, name, fields = 'unix_timestamp(date(creation)), count(name)',
+		group_by='group by date(creation)', as_dict=False)
+	return dict(data)

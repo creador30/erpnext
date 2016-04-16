@@ -8,6 +8,7 @@ frappe.require("assets/erpnext/js/utils.js");
 erpnext.TransactionController = erpnext.taxes_and_totals.extend({
 	onload: function() {
 		var me = this;
+		//this.frm.show_print_first = true;
 		if(this.frm.doc.__islocal) {
 			var today = get_today(),
 				currency = frappe.defaults.get_user_default("currency");
@@ -31,7 +32,7 @@ erpnext.TransactionController = erpnext.taxes_and_totals.extend({
 			});
 
 			if(this.frm.doc.company && !this.frm.doc.amended_from) {
-				cur_frm.script_manager.trigger("company");
+				this.frm.script_manager.trigger("company");
 			}
 		}
 
@@ -81,7 +82,7 @@ erpnext.TransactionController = erpnext.taxes_and_totals.extend({
 				me.calculate_taxes_and_totals();
 		}
 		if(frappe.meta.get_docfield(this.frm.doc.doctype + " Item", "item_code")) {
-			cur_frm.get_field("items").grid.set_multiple_add("item_code", "qty");
+			this.setup_item_selector();
 		}
 	},
 
@@ -118,7 +119,7 @@ erpnext.TransactionController = erpnext.taxes_and_totals.extend({
 
 	setup_sms: function() {
 		var me = this;
-		if(this.frm.doc.docstatus===1 && !in_list(["Lost", "Stopped"], this.frm.doc.status)
+		if(this.frm.doc.docstatus===1 && !in_list(["Lost", "Stopped", "Closed"], this.frm.doc.status)
 			&& this.frm.doctype != "Purchase Invoice") {
 			this.frm.page.add_menu_item(__('Send SMS'), function() { me.send_sms(); });
 		}
@@ -308,7 +309,15 @@ erpnext.TransactionController = erpnext.taxes_and_totals.extend({
 
 		if (this.frm.doc.posting_date) var date = this.frm.doc.posting_date;
 		else var date = this.frm.doc.transaction_date;
-		set_party_account(set_pricing);
+		
+		if (frappe.meta.get_docfield(this.frm.doctype, "shipping_address") && 
+			in_list(['Purchase Order', 'Purchase Receipt', 'Purchase Invoice'], this.frm.doctype)){
+				erpnext.utils.get_shipping_address(this.frm, function(){
+					set_party_account(set_pricing);
+				})
+		}else{
+			set_party_account(set_pricing);
+		}
 
 		if(this.frm.doc.company) {
 			erpnext.last_selected_company = this.frm.doc.company;
@@ -441,10 +450,15 @@ erpnext.TransactionController = erpnext.taxes_and_totals.extend({
 		this.frm.toggle_reqd("plc_conversion_rate",
 			!!(this.frm.doc.price_list_name && this.frm.doc.price_list_currency));
 
-		var company_currency = this.get_company_currency();
-		this.change_form_labels(company_currency);
-		this.change_grid_labels(company_currency);
-		this.frm.refresh_fields();
+		if(this.frm.doc_currency!==this.frm.doc.currency) {
+			// reset names only when the currency is different
+
+			var company_currency = this.get_company_currency();
+			this.change_form_labels(company_currency);
+			this.change_grid_labels(company_currency);
+			this.frm.refresh_fields();
+			this.frm.doc_currency = this.frm.doc.currency;
+		}
 	},
 
 	change_form_labels: function(company_currency) {
@@ -643,6 +657,12 @@ erpnext.TransactionController = erpnext.taxes_and_totals.extend({
 					"parenttype": d.parenttype,
 					"parent": d.parent
 				});
+
+				// if doctype is Quotation Item / Sales Order Iten then add Margin Type and rate in item_list
+				if (in_list(["Quotation Item", "Sales Order Item", "Delivery Note Item", "Sales Invoice Item"]), d.doctype){
+					item_list[0]["margin_type"] = d.margin_type
+					item_list[0]["margin_rate_or_amount"] = d.margin_rate_or_amount
+				}
 			}
 		};
 
@@ -841,11 +861,11 @@ erpnext.TransactionController = erpnext.taxes_and_totals.extend({
 			return;
 		}
 
-		if(!this.frm.doc.recurring_id) {
-			this.frm.set_value('recurring_id', this.frm.doc.name);
-		}
-
 		if(this.frm.doc.is_recurring) {
+			if(!this.frm.doc.recurring_id) {
+				this.frm.set_value('recurring_id', this.frm.doc.name);
+			}
+
 			var owner_email = this.frm.doc.owner=="Administrator"
 				? frappe.user_info("Administrator").email
 				: this.frm.doc.owner;
@@ -873,13 +893,22 @@ erpnext.TransactionController = erpnext.taxes_and_totals.extend({
 			}
 		}
 	},
-	
+
 	set_gross_profit: function(item) {
 		if (this.frm.doc.doctype == "Sales Order" && item.valuation_rate) {
 			rate = flt(item.rate) * flt(this.frm.doc.conversion_rate || 1);
 			item.gross_profit = flt(((rate - item.valuation_rate) * item.qty), precision("amount", item));
 		}
+	},
+
+	setup_item_selector: function() {
+		if(!this.item_selector) {
+			this.item_selector = new erpnext.ItemSelector({frm: this.frm});
+		}
 	}
+
+
+
 });
 
 frappe.ui.form.on(cur_frm.doctype + " Item", "rate", function(frm, cdt, cdn) {
@@ -891,7 +920,7 @@ frappe.ui.form.on(cur_frm.doctype + " Item", "rate", function(frm, cdt, cdn) {
 	} else {
 		item.discount_percentage = 0.0;
 	}
-	
+
 	cur_frm.cscript.set_gross_profit(item);
 	cur_frm.cscript.calculate_taxes_and_totals();
 })
@@ -957,5 +986,3 @@ frappe.ui.form.on(cur_frm.doctype, "discount_amount", function(frm) {
 
 	frm.cscript.calculate_taxes_and_totals();
 });
-
-

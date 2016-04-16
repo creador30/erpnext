@@ -7,7 +7,7 @@ app_publisher = "Frappe Technologies Pvt. Ltd."
 app_description = """ERP made simple"""
 app_icon = "icon-th"
 app_color = "#e74c3c"
-app_version = "6.27.1"
+app_version = "6.27.9"
 app_email = "info@erpnext.com"
 app_license = "GNU General Public License (v3)"
 source_link = "https://github.com/frappe/erpnext"
@@ -71,7 +71,24 @@ website_route_rules = [
 			"parents": [{"title": _("Shipments"), "name": "shipments"}]
 		}
 	},
+	{"from_route": "/rfq", "to_route": "Request for Quotation"},
+	{"from_route": "/rfq/<path:name>", "to_route": "rfq",
+		"defaults": {
+			"doctype": "Request for Quotation",
+			"parents": [{"title": _("Request for Quotation"), "name": "rfq"}]
+		}
+	},
 	{"from_route": "/jobs", "to_route": "Job Opening"},
+]
+
+portal_menu_items = [
+	{"title": _("Projects"), "route": "/project", "reference_doctype": "Project"},
+	{"title": _("Request for Quotations"), "route": "/rfq", "reference_doctype": "Request for Quotation"},
+	{"title": _("Orders"), "route": "/orders", "reference_doctype": "Sales Order"},
+	{"title": _("Invoices"), "route": "/invoices", "reference_doctype": "Sales Invoice"},
+	{"title": _("Shipments"), "route": "/shipments", "reference_doctype": "Delivery Note"},
+	{"title": _("Issues"), "route": "/issues", "reference_doctype": "Issue"},
+	{"title": _("Addresses"), "route": "/addresses", "reference_doctype": "Address"}
 ]
 
 has_website_permission = {
@@ -107,17 +124,22 @@ doc_events = {
 	},
 	"User": {
 		"validate": "erpnext.hr.doctype.employee.employee.validate_employee_role",
-		"on_update": "erpnext.hr.doctype.employee.employee.update_user_permissions"
+		"on_update": "erpnext.hr.doctype.employee.employee.update_user_permissions",
+		"on_update": "erpnext.utilities.doctype.contact.contact.update_contact"
 	},
-	"Sales Taxes and Charges Template": {
-		"on_update": "erpnext.shopping_cart.doctype.shopping_cart_settings.shopping_cart_settings.validate_cart_settings"
-	},
-	"Price List": {
+	("Sales Taxes and Charges Template", 'Price List'): {
 		"on_update": "erpnext.shopping_cart.doctype.shopping_cart_settings.shopping_cart_settings.validate_cart_settings"
 	},
 	"Address": {
 		"validate": "erpnext.shopping_cart.cart.set_customer_in_address"
-	}
+	},
+
+	# bubble transaction notification on master
+	('Opportunity', 'Quotation', 'Sales Order', 'Delivery Note', 'Sales Invoice',
+		'Supplier Quotation', 'Purchase Order', 'Purchase Receipt',
+		'Purchase Invoice', 'Project', 'Issue'): {
+			'on_change': 'erpnext.accounts.party_status.notify_status'
+		}
 }
 
 scheduler_events = {
@@ -130,7 +152,8 @@ scheduler_events = {
 		"erpnext.support.doctype.issue.issue.auto_close_tickets",
 		"erpnext.accounts.doctype.fiscal_year.fiscal_year.auto_create_fiscal_year",
 		"erpnext.hr.doctype.employee.employee.send_birthday_reminders",
-		"erpnext.projects.doctype.task.task.set_tasks_as_overdue"
+		"erpnext.projects.doctype.task.task.set_tasks_as_overdue",
+		"erpnext.accounts.doctype.asset.depreciation.post_depreciation_entries"
 	]
 }
 
@@ -143,3 +166,7 @@ default_mail_footer = """<div style="text-align: center;">
 get_translated_dict = {
 	("doctype", "Global Defaults"): "frappe.geo.country_info.get_translated_dict"
 }
+
+bot_parsers = [
+	'erpnext.utilities.bot.FindItemBot',
+]

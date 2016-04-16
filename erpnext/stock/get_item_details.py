@@ -101,9 +101,8 @@ def process_args(args):
 		args.item_code = get_item_code(barcode=args.barcode)
 	elif not args.item_code and args.serial_no:
 		args.item_code = get_item_code(serial_no=args.serial_no)
-
+	
 	set_transaction_type(args)
-
 	return args
 
 @frappe.whitelist()
@@ -126,19 +125,10 @@ def validate_item_details(args, item):
 	from erpnext.stock.doctype.item.item import validate_end_of_life
 	validate_end_of_life(item.name, item.end_of_life, item.disabled)
 
-	if args.transaction_type=="selling":
-		# validate if sales item or service item
-		if item.is_sales_item != 1:
-			throw(_("Item {0} must be a Sales Item").format(item.name))
-
-		if cint(item.has_variants):
-			throw(_("Item {0} is a template, please select one of its variants").format(item.name))
-
+	if args.transaction_type=="selling" and cint(item.has_variants):
+		throw(_("Item {0} is a template, please select one of its variants").format(item.name))
+		
 	elif args.transaction_type=="buying" and args.doctype != "Material Request":
-		# validate if purchase item or subcontracted item
-		if item.is_purchase_item != 1:
-			throw(_("Item {0} must be a Purchase Item").format(item.name))
-
 		if args.get("is_subcontracted") == "Yes" and item.is_sub_contracted_item != 1:
 			throw(_("Item {0} must be a Sub-contracted Item").format(item.name))
 
@@ -433,7 +423,6 @@ def apply_price_list(args, as_doc=False):
 					# update the value
 					if fieldname in item and fieldname not in ("name", "doctype"):
 						item[fieldname] = children[i][fieldname]
-
 		return args
 	else:
 		return {
@@ -511,4 +500,4 @@ def get_gross_profit(out):
 		})
 	
 	return out
-	
+

@@ -41,7 +41,7 @@ class GLEntry(Document):
 		mandatory = ['account','remarks','voucher_type','voucher_no','company']
 		for k in mandatory:
 			if not self.get(k):
-				frappe.throw(_("{0} is required").format(self.meta.get_label(k)))
+				frappe.throw(_("{0} is required").format(_(self.meta.get_label(k))))
 
 		account_type = frappe.db.get_value("Account", self.account, "account_type")
 		if account_type in ["Receivable", "Payable"] and not (self.party_type and self.party):
@@ -88,8 +88,8 @@ class GLEntry(Document):
 					"Cost Center", self.cost_center, "company")
 
 			return self.cost_center_company[self.cost_center]
-
-		if self.cost_center and _get_cost_center_company() != self.company:
+		
+		if self.cost_center and _get_cost_center_company() != self.company:	
 			frappe.throw(_("Cost Center {0} does not belong to Company {1}").format(self.cost_center, self.company))
 
 	def validate_party(self):

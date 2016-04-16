@@ -55,12 +55,15 @@ erpnext.stock.StockEntry = erpnext.stock.StockController.extend({
 
 	onload_post_render: function() {
 		var me = this;
-		cur_frm.get_field("items").grid.set_multiple_add("item_code", "qty");
 		this.set_default_account(function() {
 			if(me.frm.doc.__islocal && me.frm.doc.company && !me.frm.doc.amended_from) {
 				cur_frm.script_manager.trigger("company");
 			}
 		});
+
+		if(!this.item_selector) {
+			this.item_selector = new erpnext.ItemSelector({frm: this.frm});
+		}
 	},
 
 	refresh: function() {
@@ -72,6 +75,7 @@ erpnext.stock.StockEntry = erpnext.stock.StockController.extend({
 		if (cint(frappe.defaults.get_default("auto_accounting_for_stock"))) {
 			this.show_general_ledger();
 		}
+		erpnext.hide_company();
 	},
 
 	on_submit: function() {
@@ -180,7 +184,7 @@ erpnext.stock.StockEntry = erpnext.stock.StockController.extend({
 				var excise = frappe.model.make_new_doc_and_get_name('Journal Entry');
 				excise = locals['Journal Entry'][excise];
 				excise.voucher_type = 'Excise Entry';
-				loaddoc('Journal Entry', excise.name);
+				frappe.set_route('Form', 'Journal Entry', excise.name);
 			}, __("Make"));
 			cur_frm.page.set_inner_btn_group_as_primary(__("Make"));
 	},

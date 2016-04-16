@@ -20,8 +20,9 @@ class BuyingController(StockController):
 			}
 
 	def get_feed(self):
-		return _("From {0} | {1} {2}").format(self.supplier_name, self.currency,
-			self.grand_total)
+		if self.get("supplier_name"):
+			return _("From {0} | {1} {2}").format(self.supplier_name, self.currency,
+				self.grand_total)
 
 	def validate(self):
 		super(BuyingController, self).validate()
@@ -40,7 +41,7 @@ class BuyingController(StockController):
 
 		# set contact and address details for supplier, if they are not mentioned
 		if getattr(self, "supplier", None):
-			self.update_if_missing(get_party_details(self.supplier, party_type="Supplier"))
+			self.update_if_missing(get_party_details(self.supplier, party_type="Supplier", ignore_permissions=self.flags.ignore_permissions))
 
 		self.set_missing_item_details()
 
@@ -249,19 +250,6 @@ class BuyingController(StockController):
 					(", ".join((["%s"]*len(item_codes))),), item_codes)]
 
 		return self._sub_contracted_items
-
-	@property
-	def purchase_items(self):
-		if not hasattr(self, "_purchase_items"):
-			self._purchase_items = []
-			item_codes = list(set(item.item_code for item in
-				self.get("items")))
-			if item_codes:
-				self._purchase_items = [r[0] for r in frappe.db.sql("""select name
-					from `tabItem` where name in (%s) and is_purchase_item='Yes'""" % \
-					(", ".join((["%s"]*len(item_codes))),), item_codes)]
-
-		return self._purchase_items
 
 	def is_item_table_empty(self):
 		if not len(self.get("items")):

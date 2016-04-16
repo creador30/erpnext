@@ -19,8 +19,7 @@ class EmployeeUserDisabledError(frappe.ValidationError):
 
 class Employee(Document):
 	def onload(self):
-		self.get("__onload").salary_structure_exists = frappe.db.get_value("Salary Structure",
-				{"employee": self.name, "is_active": "Yes", "docstatus": ["!=", 2]})
+		self.set_onload('links', self.meta.get_links_setup())
 
 	def autoname(self):
 		naming_method = frappe.db.get_value("HR Settings", None, "emp_created_by")
@@ -133,11 +132,11 @@ class Employee(Document):
 	def validate_for_enabled_user_id(self):
 		if not self.status == 'Active':
 			return
-		enabled = frappe.db.sql("""select name from `tabUser` where
-			name=%s and enabled=1""", self.user_id)
-		if not enabled:
-			throw(_("User {0} is disabled").format(
-				self.user_id), EmployeeUserDisabledError)
+		enabled = frappe.db.get_value("User", self.user_id, "enabled")
+		if enabled is None:
+			frappe.throw(_("User {0} does not exist").format(self.user_id))
+		if enabled == 0:
+			frappe.throw(_("User {0} is disabled").format(self.user_id), EmployeeUserDisabledError)
 
 	def validate_duplicate_user_id(self):
 		employee = frappe.db.sql_list("""select name from `tabEmployee` where
@@ -158,6 +157,28 @@ class Employee(Document):
 	def on_trash(self):
 		delete_events(self.doctype, self.name)
 
+	def get_timeline_data(self):
+		'''returns timeline data based on attendance'''
+		return
+
+@frappe.whitelist()
+def get_dashboard_data(name):
+	'''load dashboard related data'''
+	frappe.has_permission(doc=frappe.get_doc('Employee', name), throw=True)
+
+	from frappe.desk.notifications import get_open_count
+	return {
+		'count': get_open_count('Employee', name),
+		'timeline_data': get_timeline_data(name),
+	}
+
+def get_timeline_data(name):
+	'''Return timeline for attendance'''
+	return dict(frappe.db.sql('''select unix_timestamp(att_date), count(*)
+		from `tabAttendance` where employee=%s
+			and att_date > date_sub(curdate(), interval 1 year)
+			and status in ('Present', 'Half Day')
+			group by att_date''', name))
 
 @frappe.whitelist()
 def get_retirement_date(date_of_birth=None):
@@ -229,14 +250,13 @@ def get_employees_who_are_born_today():
 		and status = 'Active'""", {"date": today()}, as_dict=True)
 
 def get_holiday_list_for_employee(employee, raise_exception=True):
-	employee = frappe.db.get_value("Employee", employee, ["holiday_list", "company"], as_dict=True)
-	holiday_list = employee.holiday_list
+	holiday_list, company = frappe.db.get_value("Employee", employee, ["holiday_list", "company"])
 
 	if not holiday_list:
-		holiday_list = frappe.db.get_value("Company", employee.company, "default_holiday_list")
+		holiday_list = frappe.db.get_value("Company", company, "default_holiday_list")
 
 	if not holiday_list and raise_exception:
-		frappe.throw(_("Please set a Holiday List for either the Employee or the Company"))
+		frappe.throw(_('Please set a default Holiday List for Employee {0} or Company {0}').format(employee, company))
 
 	return holiday_list
 

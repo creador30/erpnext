@@ -147,7 +147,7 @@
   }, 
   {
    "allow_on_submit": 0, 
-   "bold": 0, 
+   "bold": 1, 
    "collapsible": 0, 
    "depends_on": "", 
    "fieldname": "customer_name", 
@@ -967,14 +967,14 @@
  "hide_heading": 0, 
  "hide_toolbar": 0, 
  "icon": "icon-info-sign", 
- "idx": 1, 
+ "idx": 195, 
  "in_create": 0, 
  "in_dialog": 0, 
  "is_submittable": 0, 
  "issingle": 0, 
  "istable": 0, 
  "max_attachments": 0, 
- "modified": "2016-03-03 06:13:49.728079", 
+ "modified": "2016-04-06 03:15:24.676978", 
  "modified_by": "Administrator", 
  "module": "CRM", 
  "name": "Opportunity", 
@@ -1027,5 +1027,6 @@
  "sort_field": "modified", 
  "sort_order": "DESC", 
  "timeline_field": "customer", 
- "title_field": "title"
+ "title_field": "title", 
+ "track_seen": 1
 }

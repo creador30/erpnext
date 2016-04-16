@@ -4,9 +4,9 @@
 from __future__ import unicode_literals
 import frappe
 from frappe import _, throw
-from frappe.utils import today, flt, cint, fmt_money
+from frappe.utils import today, flt, cint, fmt_money, formatdate
 from erpnext.setup.utils import get_company_currency, get_exchange_rate
-from erpnext.accounts.utils import get_fiscal_year, validate_fiscal_year, get_account_currency
+from erpnext.accounts.utils import get_fiscal_years, validate_fiscal_year, get_account_currency
 from erpnext.utilities.transaction_base import TransactionBase
 from erpnext.controllers.recurring_document import convert_to_recurring, validate_recurring_document
 from erpnext.controllers.sales_and_purchase_return import validate_return
@@ -48,9 +48,12 @@ class AccountsController(TransactionBase):
 		self.validate_party()
 		self.validate_currency()
 		
-		if self.meta.get_field("is_recurring") and not self.get("__islocal"):
-			validate_recurring_document(self)
-			convert_to_recurring(self, self.get("posting_date") or self.get("transaction_date"))
+		if self.meta.get_field("is_recurring"):
+			if self.amended_from and self.recurring_id:
+				self.recurring_id = None
+			if not self.get("__islocal"):
+				validate_recurring_document(self)
+				convert_to_recurring(self, self.get("posting_date") or self.get("transaction_date"))
 
 	def on_update_after_submit(self):
 		if self.meta.get_field("is_recurring"):
@@ -61,8 +64,6 @@ class AccountsController(TransactionBase):
 		for fieldname in ["posting_date", "transaction_date"]:
 			if not self.get(fieldname) and self.meta.get_field(fieldname):
 				self.set(fieldname, today())
-				if self.meta.get_field("fiscal_year") and not self.fiscal_year:
-					self.fiscal_year = get_fiscal_year(self.get(fieldname))[0]
 				break
 
 	def calculate_taxes_and_totals(self):
@@ -138,6 +139,10 @@ class AccountsController(TransactionBase):
 			for fieldname in self.meta.get_valid_columns():
 				parent_dict[fieldname] = self.get(fieldname)
 
+			if self.doctype in ["Quotation", "Sales Order", "Delivery Note", "Sales Invoice"]:
+				document_type = "{} Item".format(self.doctype)
+				parent_dict.update({"document_type": document_type})
+
 			for item in self.get("items"):
 				if item.get("item_code"):
 					args = parent_dict.copy()
@@ -166,6 +171,7 @@ class AccountsController(TransactionBase):
 								item.set(fieldname, value)
 
 					if ret.get("pricing_rule"):
+						# if user changed the discount percentage then set user's discount percentage ?
 						item.set("discount_percentage", ret.get("discount_percentage"))
 						if ret.get("pricing_rule_for") == "Price":
 							item.set("pricing_list_rate", ret.get("pricing_list_rate"))
@@ -214,10 +220,17 @@ class AccountsController(TransactionBase):
 
 	def get_gl_dict(self, args, account_currency=None):
 		"""this method populates the common properties of a gl entry record"""
+		
+		fiscal_years = get_fiscal_years(self.posting_date, company=self.company)
+		if len(fiscal_years) > 1:
+			frappe.throw(_("Multiple fiscal years exist for the date {0}. Please set company in Fiscal Year").format(formatdate(self.posting_date)))
+		else:
+			fiscal_year = fiscal_years[0][0]
+						
 		gl_dict = frappe._dict({
 			'company': self.company,
 			'posting_date': self.posting_date,
-			'fiscal_year': get_fiscal_year(self.posting_date, company=self.company)[0],
+			'fiscal_year': fiscal_year,
 			'voucher_type': self.doctype,
 			'voucher_no': self.name,
 			'remarks': self.get("remarks"),
@@ -271,7 +284,7 @@ class AccountsController(TransactionBase):
 		res = frappe.db.sql("""
 			select
 				t1.name as jv_no, t1.remark, t2.{0} as amount, t2.name as jv_detail_no,
-				reference_name as against_order
+				t2.reference_name as against_order
 			from
 				`tabJournal Entry` t1, `tabJournal Entry Account` t2
 			where
@@ -450,7 +463,20 @@ class AccountsController(TransactionBase):
 				# Note: not validating with gle account because we don't have the account
 				# at quotation / sales order level and we shouldn't stop someone
 				# from creating a sales invoice if sales order is already created
-
+				
+	def validate_asset(self, asset, item_row):
+		if asset.company != self.company:
+			frappe.throw(_("Row #{0}: Asset {1} does not belong to company {2}")
+				.format(item_row.idx, item_row.asset, self.company))
+				
+		elif asset.item_code != item_row.item_code:
+			frappe.throw(_("Row #{0}: Asset {1} does not linked to Item {2}")
+				.format(item_row.idx, item_row.asset, item_row.item_code))
+		elif asset.docstatus != 1:
+			frappe.throw(_("Row #{0}: Asset {1} must be submitted").format(item_row.idx, item_row.asset))
+		elif item_row.qty > 1:
+			frappe.throw(_("Row #{0}: Qty must be 1, as item is linked to an asset").format(item_row.idx))
+						
 @frappe.whitelist()
 def get_tax_rate(account_head):
 	return frappe.db.get_value("Account", account_head, "tax_rate")

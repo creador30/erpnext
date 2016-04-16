@@ -51,7 +51,10 @@ class SellingController(StockController):
 
 		elif getattr(self, "lead", None):
 			from erpnext.crm.doctype.lead.lead import get_lead_details
-			self.update_if_missing(get_lead_details(self.lead))
+			self.update_if_missing(get_lead_details(
+				self.lead,
+				posting_date=self.get('transaction_date') or self.get('posting_date'),
+				company=self.company))
 
 	def set_price_list_and_item_details(self):
 		self.set_price_list_currency("Selling")
@@ -229,11 +232,10 @@ class SellingController(StockController):
 def check_active_sales_items(obj):
 	for d in obj.get("items"):
 		if d.item_code:
-			item = frappe.db.sql("""select docstatus, is_sales_item,
+			item = frappe.db.sql("""select docstatus,
 				income_account from tabItem where name = %s""",
 				d.item_code, as_dict=True)[0]
-			if item.is_sales_item == 0:
-				frappe.throw(_("Item {0} must be a Sales Item in {1}").format(d.item_code, d.idx))
+                
 			if getattr(d, "income_account", None) and not item.income_account:
 				frappe.db.set_value("Item", d.item_code, "income_account",
 					d.income_account)
